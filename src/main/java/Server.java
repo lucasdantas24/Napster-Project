@@ -2,9 +2,6 @@ import java.rmi.AlreadyBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
-import java.rmi.server.ServerNotActiveException;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Scanner;
 
 import static java.lang.Integer.parseInt;
