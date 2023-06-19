@@ -13,7 +13,8 @@ public class PeerClient {
     private final String ip;
     private final int port;
     private final String folderPath;
-    private ArrayList<String> fileNames;
+    private final ArrayList<String> fileNames;
+    private String requestedFile;
     public static final String DEFAULT_IP = "127.0.0.1";
     public static final int DEFAULT_PORT = 1099;
 
@@ -113,7 +114,15 @@ public class PeerClient {
         }
     }
 
-    private static void searchReq(PeerClient peerClient, RequisitionInterface server) {
+    private static void searchReq(PeerClient peerClient, RequisitionInterface server) throws ServerNotActiveException, RemoteException {
+        Scanner scanner = new Scanner(System.in);
+        System.out.print("Informe o arquivo que deseja procurar: ");
+        String fileName = scanner.nextLine().trim();
+
+        ArrayList<String> response = server.search(peerClient.getIp(), peerClient.getPort(), fileName);
+
+        System.out.println("peers com arquivo solicitado: " + response.toString());
+        if (!response.isEmpty()) peerClient.setRequestedFile(fileName);
     }
 
     private static void downloadReq(PeerClient peerClient, RequisitionInterface server) {
@@ -147,4 +156,7 @@ public class PeerClient {
         return fileNames;
     }
 
+    public void setRequestedFile(String requestedFile) {
+        this.requestedFile = requestedFile;
+    }
 }
