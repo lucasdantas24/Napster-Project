@@ -12,6 +12,4 @@ public interface RequisitionInterface extends Remote {
 
     String update(String ipPeer, int portPeer, String fileName) throws RemoteException;
 
-    String logOut(String ipPeer, int portPeer, ArrayList<String> files) throws RemoteException, ServerNotActiveException;
-
 }

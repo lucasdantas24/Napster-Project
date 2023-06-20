@@ -1,4 +1,6 @@
-import java.io.File;
+import java.io.*;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -65,7 +67,15 @@ public class PeerClient {
 
         ArrayList<String> fileNames = FileListing(folderPath);
 
-        return new PeerClient(ip, port, folderPath, fileNames);
+        PeerClient peerClient = new PeerClient(ip, port, folderPath, fileNames);
+
+        DownloadRequisitionReceiver drr = new DownloadRequisitionReceiver(peerClient);
+
+        // Inicia thread para tratar requisições de download paralelamente
+        Thread drrThread = new Thread(drr);
+        drrThread.start();
+
+        return peerClient;
     }
 
     private static void menu(PeerClient peerClient, RequisitionInterface server) throws ServerNotActiveException, RemoteException {
@@ -78,7 +88,6 @@ public class PeerClient {
             System.out.println("1 - JOIN");
             System.out.println("2 - SEARCH");
             System.out.println("3 - DOWNLOAD");
-            System.out.println("4 - LOG OUT");
             System.out.println("Aperte 0 para desligar o peer");
             function = sc.nextInt();
 
@@ -91,9 +100,6 @@ public class PeerClient {
                     break;
                 case 3:
                     downloadReq(peerClient, server);
-                    break;
-                case 4:
-                    logOutReq(peerClient, server);
                     break;
             }
 
@@ -126,16 +132,170 @@ public class PeerClient {
     }
 
     private static void downloadReq(PeerClient peerClient, RequisitionInterface server) {
+        Scanner scanner = new Scanner(System.in);
+        System.out.print("Informe o IP do peer a solicitar download: ");
+        String ip = scanner.nextLine().trim();
+        System.out.print("Informe a porta do peer a solicitar download: ");
+        String port = scanner.nextLine().trim();
+
+        if (peerClient.getRequestedFile().isEmpty() || peerClient.getRequestedFile() == null) {
+            System.out.print("Favor informar arquivo: ");
+            String requestedFile = scanner.nextLine().trim();
+            peerClient.setRequestedFile(requestedFile);
+        }
+
+        DownloadRequisitionSender drs = new DownloadRequisitionSender(peerClient, ip, port, server);
+        Thread drsThread = new Thread(drs);
+        drsThread.start();
+
     }
 
-    private static void logOutReq(PeerClient peerClient, RequisitionInterface server) {
-        String response = "as";
-    }
+    static class DownloadRequisitionReceiver implements Runnable {
+        private final PeerClient client;
 
-    static class downloadRequisitionsHandler implements Runnable {
+        public DownloadRequisitionReceiver(PeerClient client) {
+            this.client = client;
+        }
 
         @Override
         public void run() {
+            try {
+                ServerSocket serverSocket = new ServerSocket(client.getPort());
+
+                while (true) {
+
+                    Socket socket = serverSocket.accept();
+
+                    System.out.println("Solicitação recebida " + client.getRequestedFile());
+
+                    InputStream inputStream = socket.getInputStream();
+                    DataInputStream dataInputStream = new DataInputStream(inputStream);
+                    String fileName = dataInputStream.readUTF();
+
+                    DownloadSender ds = new DownloadSender(socket, fileName, client);
+
+                    // Inicia thread para enviar arquivo paralelamente
+                    Thread dsThread = new Thread(ds);
+                    dsThread.start();
+
+
+
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    static class DownloadRequisitionSender implements Runnable {
+        private final PeerClient peerClient;
+        private final String ip;
+        private final int port;
+        private final RequisitionInterface server;
+
+        public DownloadRequisitionSender(PeerClient peerClient, String ip, String port, RequisitionInterface server) {
+            this.peerClient = peerClient;
+            this.ip = ip;
+            this.port = Integer.parseInt(port);
+            this.server = server;
+        }
+
+        @Override
+        public void run() {
+            try {
+                Socket socket = new Socket(ip, port);
+
+                OutputStream outputStream = socket.getOutputStream();
+                DataOutputStream dataOutputStream = new DataOutputStream(outputStream);
+                dataOutputStream.writeUTF(peerClient.getRequestedFile());
+
+                DownloadReceiver dr = new DownloadReceiver(socket, peerClient, server);
+
+                Thread drThread = new Thread(dr);
+                drThread.start();
+
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    static class DownloadSender implements Runnable {
+        private final Socket socket;
+        private final String fileName;
+        private final PeerClient client;
+
+        public DownloadSender(Socket socket, String fileName, PeerClient client) {
+            this.socket = socket;
+            this.fileName = fileName;
+            this.client = client;
+        }
+
+        @Override
+        public void run() {
+            try {
+                File file = new File(client.getFolderPath(),fileName);
+                FileInputStream fileInputStream = new FileInputStream(file);
+                OutputStream outputStream = socket.getOutputStream();
+
+                byte[] buffer = new byte[4096];
+                int bytesRead;
+                while ((bytesRead = fileInputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+
+                fileInputStream.close();
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    static class DownloadReceiver implements Runnable {
+        private final Socket socket;
+        private final PeerClient client;
+        private final RequisitionInterface server;
+
+        public DownloadReceiver(Socket socket, PeerClient client, RequisitionInterface server) {
+            this.socket = socket;
+            this.client = client;
+            this.server = server;
+        }
+
+        @Override
+        public void run() {
+            try {
+                InputStream inputStream = socket.getInputStream();
+
+                FileOutputStream fileOutputStream = new FileOutputStream(
+                        client.getFolderPath()
+                        + File.separator
+                        + client.getRequestedFile());
+
+                byte[] buffer = new byte[4096];
+                int bytesRead;
+                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    fileOutputStream.write(buffer, 0, bytesRead);
+                }
+
+                System.out.println("Arquivo "
+                                + client.getRequestedFile()
+                                + " baixado com sucesso na pasta "
+                                + client.getFolderPath());
+
+                server.update(client.getIp(), client.getPort(), client.requestedFile);
+
+                fileOutputStream.close();
+                inputStream.close();
+                socket.close();
+
+
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
 
         }
     }
@@ -154,6 +314,10 @@ public class PeerClient {
 
     public ArrayList<String> getFileNames() {
         return fileNames;
+    }
+
+    public String getRequestedFile() {
+        return requestedFile;
     }
 
     public void setRequestedFile(String requestedFile) {

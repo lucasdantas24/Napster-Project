@@ -40,12 +40,20 @@ public class Requisitions extends UnicastRemoteObject implements RequisitionInte
 
     @Override
     public String update(String ipPeer, int portPeer, String fileName) throws RemoteException {
-        return "UPDATE_OK";
-    }
+        String peerKey = ipPeer + ":" + portPeer;
+        if (joinedPeers.containsKey(peerKey)) {
+            ArrayList<String> files = joinedPeers.get(peerKey);
+            if (!files.contains(fileName)) {
+                files.add(fileName);
+                joinedPeers.put(peerKey, files);
+            } else {
+                return "Arquivo já está registrado";
+            }
+        } else {
+            return "Peer não encontrado";
+        }
 
-    @Override
-    public String logOut(String ipPeer, int portPeer, ArrayList<String> files) throws RemoteException, ServerNotActiveException {
-        return null;
+        return "UPDATE_OK";
     }
 
 }
