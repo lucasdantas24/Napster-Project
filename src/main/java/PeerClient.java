@@ -138,13 +138,13 @@ public class PeerClient {
         System.out.print("Informe a porta do peer a solicitar download: ");
         String port = scanner.nextLine().trim();
 
-        if (peerClient.getRequestedFile().isEmpty() || peerClient.getRequestedFile() == null) {
+        if (peerClient.getRequestedFile() == null || peerClient.getRequestedFile().isEmpty()) {
             System.out.print("Favor informar arquivo: ");
             String requestedFile = scanner.nextLine().trim();
             peerClient.setRequestedFile(requestedFile);
         }
 
-        DownloadRequisitionSender drs = new DownloadRequisitionSender(peerClient, ip, port, server);
+        DownloadHandler drs = new DownloadHandler(peerClient, ip, port, server);
         Thread drsThread = new Thread(drs);
         drsThread.start();
 
@@ -166,13 +166,7 @@ public class PeerClient {
 
                     Socket socket = serverSocket.accept();
 
-                    System.out.println("Solicitação recebida " + client.getRequestedFile());
-
-                    InputStream inputStream = socket.getInputStream();
-                    DataInputStream dataInputStream = new DataInputStream(inputStream);
-                    String fileName = dataInputStream.readUTF();
-
-                    DownloadSender ds = new DownloadSender(socket, fileName, client);
+                    DownloadSender ds = new DownloadSender(socket, client);
 
                     // Inicia thread para enviar arquivo paralelamente
                     Thread dsThread = new Thread(ds);
@@ -187,14 +181,14 @@ public class PeerClient {
         }
     }
 
-    static class DownloadRequisitionSender implements Runnable {
-        private final PeerClient peerClient;
+    static class DownloadHandler implements Runnable {
+        private final PeerClient client;
         private final String ip;
         private final int port;
         private final RequisitionInterface server;
 
-        public DownloadRequisitionSender(PeerClient peerClient, String ip, String port, RequisitionInterface server) {
-            this.peerClient = peerClient;
+        public DownloadHandler(PeerClient client, String ip, String port, RequisitionInterface server) {
+            this.client = client;
             this.ip = ip;
             this.port = Integer.parseInt(port);
             this.server = server;
@@ -207,12 +201,46 @@ public class PeerClient {
 
                 OutputStream outputStream = socket.getOutputStream();
                 DataOutputStream dataOutputStream = new DataOutputStream(outputStream);
-                dataOutputStream.writeUTF(peerClient.getRequestedFile());
+                dataOutputStream.writeUTF(client.getRequestedFile());
 
-                DownloadReceiver dr = new DownloadReceiver(socket, peerClient, server);
+                InputStream inputStream = socket.getInputStream();
+                DataInputStream dataInputStream = new DataInputStream(inputStream);
+                String downloadResponse = dataInputStream.readUTF();
 
-                Thread drThread = new Thread(dr);
-                drThread.start();
+                if (downloadResponse.equals("FILE_NOT_FOUND")) {
+                    outputStream.close();
+                    dataOutputStream.close();
+                    inputStream.close();
+                    dataInputStream.close();
+                } else {
+                    dataOutputStream.writeUTF("INITIATING_DOWNLOAD");
+
+                    FileOutputStream fileOutputStream = new FileOutputStream(
+                            client.getFolderPath()
+                                    + File.separator
+                                    + client.getRequestedFile());
+
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+                    while ((bytesRead = dataInputStream.read(buffer)) != -1) {
+                        fileOutputStream.write(buffer, 0, bytesRead);
+                    }
+
+                    System.out.println("Arquivo "
+                            + client.getRequestedFile()
+                            + " baixado com sucesso na pasta "
+                            + client.getFolderPath());
+
+                    server.update(client.getIp(), client.getPort(), client.requestedFile);
+
+                    dataOutputStream.close();
+                    dataInputStream.close();
+                    fileOutputStream.close();
+                    inputStream.close();
+                    outputStream.close();
+                    socket.close();
+                }
+
 
 
             } catch (IOException e) {
@@ -223,29 +251,53 @@ public class PeerClient {
 
     static class DownloadSender implements Runnable {
         private final Socket socket;
-        private final String fileName;
         private final PeerClient client;
 
-        public DownloadSender(Socket socket, String fileName, PeerClient client) {
+        public DownloadSender(Socket socket, PeerClient client) {
             this.socket = socket;
-            this.fileName = fileName;
             this.client = client;
         }
 
         @Override
         public void run() {
             try {
-                File file = new File(client.getFolderPath(),fileName);
-                FileInputStream fileInputStream = new FileInputStream(file);
+
+                InputStream inputStream = socket.getInputStream();
+                DataInputStream dataInputStream = new DataInputStream(inputStream);
+                String fileName = dataInputStream.readUTF();
+
                 OutputStream outputStream = socket.getOutputStream();
+                DataOutputStream dataOutputStream = new DataOutputStream(outputStream);
 
-                byte[] buffer = new byte[4096];
-                int bytesRead;
-                while ((bytesRead = fileInputStream.read(buffer)) != -1) {
-                    outputStream.write(buffer, 0, bytesRead);
+                if (!client.getFileNames().contains(fileName)) {
+
+                    dataOutputStream.writeUTF("FILE_NOT_FOUND");
+
+                    dataInputStream.close();
+                    inputStream.close();
+                    dataOutputStream.close();
+                    outputStream.close();
+                } else {
+
+                    dataOutputStream.writeUTF("FILE_FOUND");
+
+                    String confirmation = dataInputStream.readUTF();
+
+                    File file = new File(client.getFolderPath(), fileName);
+                    FileInputStream fileInputStream = new FileInputStream(file);
+
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+                    while ((bytesRead = fileInputStream.read(buffer)) != -1) {
+                        dataOutputStream.write(buffer, 0, bytesRead);
+                    }
+
+                    dataInputStream.close();
+                    inputStream.close();
+                    fileInputStream.close();
+                    outputStream.close();
+                    socket.close();
                 }
-
-                fileInputStream.close();
 
             } catch (IOException e) {
                 e.printStackTrace();
@@ -253,51 +305,9 @@ public class PeerClient {
         }
     }
 
-    static class DownloadReceiver implements Runnable {
-        private final Socket socket;
-        private final PeerClient client;
-        private final RequisitionInterface server;
+    public static int bufferSize() {
 
-        public DownloadReceiver(Socket socket, PeerClient client, RequisitionInterface server) {
-            this.socket = socket;
-            this.client = client;
-            this.server = server;
-        }
-
-        @Override
-        public void run() {
-            try {
-                InputStream inputStream = socket.getInputStream();
-
-                FileOutputStream fileOutputStream = new FileOutputStream(
-                        client.getFolderPath()
-                        + File.separator
-                        + client.getRequestedFile());
-
-                byte[] buffer = new byte[4096];
-                int bytesRead;
-                while ((bytesRead = inputStream.read(buffer)) != -1) {
-                    fileOutputStream.write(buffer, 0, bytesRead);
-                }
-
-                System.out.println("Arquivo "
-                                + client.getRequestedFile()
-                                + " baixado com sucesso na pasta "
-                                + client.getFolderPath());
-
-                server.update(client.getIp(), client.getPort(), client.requestedFile);
-
-                fileOutputStream.close();
-                inputStream.close();
-                socket.close();
-
-
-
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-
-        }
+        return 0;
     }
 
     public String getIp() {
