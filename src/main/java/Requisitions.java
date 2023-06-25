@@ -1,5 +1,4 @@
 import java.rmi.RemoteException;
-import java.rmi.server.ServerNotActiveException;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -12,7 +11,7 @@ public class Requisitions extends UnicastRemoteObject implements RequisitionInte
     }
 
     @Override
-    public String join(String ipPeer, int portPeer, ArrayList<String> files) throws RemoteException, ServerNotActiveException {
+    public String join(String ipPeer, int portPeer, ArrayList<String> files) throws RemoteException {
         String peerKey = ipPeer + ":" + portPeer;
         if (joinedPeers.containsKey(peerKey)) {
             return "Erro! Peer já realizou JOIN!";
@@ -26,7 +25,7 @@ public class Requisitions extends UnicastRemoteObject implements RequisitionInte
     }
 
     @Override
-    public ArrayList<String> search(String ipPeer, int portPeer, String fileName) throws RemoteException, ServerNotActiveException {
+    public ArrayList<String> search(String ipPeer, int portPeer, String fileName) throws RemoteException {
         String peerKey = ipPeer + ":" + portPeer;
         System.out.println("Peer " + peerKey + " solicitou arquivo " + fileName);
         ArrayList<String> peerWithRequestedFile = new ArrayList<>();

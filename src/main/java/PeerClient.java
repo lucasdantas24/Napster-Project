@@ -15,7 +15,7 @@ public class PeerClient {
     private final String ip;
     private final int port;
     private final String folderPath;
-    private final ArrayList<String> fileNames;
+    private ArrayList<String> fileNames;
     private String requestedFile;
     public static final String DEFAULT_IP = "127.0.0.1";
     public static final int DEFAULT_PORT = 1099;
@@ -69,18 +69,18 @@ public class PeerClient {
 
         PeerClient peerClient = new PeerClient(ip, port, folderPath, fileNames);
 
-        DownloadRequisitionReceiver drr = new DownloadRequisitionReceiver(peerClient);
-
-        // Inicia thread para tratar requisições de download paralelamente
-        Thread drrThread = new Thread(drr);
-        drrThread.start();
-
         return peerClient;
     }
 
     private static void menu(PeerClient peerClient, RequisitionInterface server) throws ServerNotActiveException, RemoteException {
         Scanner sc = new Scanner(System.in);
         int function;
+
+        DownloadRequisitionReceiver drr = new DownloadRequisitionReceiver(peerClient);
+
+        // Inicia thread para tratar requisições de download paralelamente
+        Thread drrThread = new Thread(drr);
+        drrThread.start();
 
         do {
             System.out.println("---------Menu do Peer---------");
@@ -101,6 +101,8 @@ public class PeerClient {
                 case 3:
                     downloadReq(peerClient, server);
                     break;
+                case 0:
+                    drrThread.interrupt();
             }
 
         } while (function != 0);
@@ -159,10 +161,9 @@ public class PeerClient {
 
         @Override
         public void run() {
-            try {
-                ServerSocket serverSocket = new ServerSocket(client.getPort());
+            try (ServerSocket serverSocket = new ServerSocket(client.getPort())) {
 
-                while (true) {
+                do {
 
                     Socket socket = serverSocket.accept();
 
@@ -172,9 +173,7 @@ public class PeerClient {
                     Thread dsThread = new Thread(ds);
                     dsThread.start();
 
-
-
-                }
+                } while (!Thread.currentThread().isInterrupted());
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -182,6 +181,7 @@ public class PeerClient {
     }
 
     static class DownloadHandler implements Runnable {
+        private static final int BUFFER_SIZE = 4096;
         private final PeerClient client;
         private final String ip;
         private final int port;
@@ -215,12 +215,36 @@ public class PeerClient {
                 } else {
                     dataOutputStream.writeUTF("INITIATING_DOWNLOAD");
 
+                    String fileName = client.getRequestedFile();
+
+                    if (client.getFileNames().contains(fileName)) {
+                        Scanner sc = new Scanner(System.in);
+                        System.out.println("Ha um arquivo com mesmo nome na pasta, deseja substituir? [S/N]");
+                        String response = sc.nextLine();
+                        if (response.equals("S")) {
+                            File file = new File(
+                                    client.getFolderPath()
+                                            + File.separator
+                                            + fileName);
+                            file.delete();
+                        } else {
+                            int cont = 1;
+                            String baseName = client.getRequestedFile()
+                                    .substring(0, client.getRequestedFile().lastIndexOf('.'));
+                            String extension = client.getRequestedFile()
+                                    .substring(client.getRequestedFile().lastIndexOf('.') + 1);
+                            while (client.getFileNames().contains(baseName + "(" + cont + ")" + extension)) cont++;
+                            fileName = baseName + "(" + cont + ")" + extension;
+                        }
+
+                    }
+
                     FileOutputStream fileOutputStream = new FileOutputStream(
                             client.getFolderPath()
                                     + File.separator
-                                    + client.getRequestedFile());
+                                    + fileName);
 
-                    byte[] buffer = new byte[4096];
+                    byte[] buffer = new byte[downloadBufferSize(socket.getReceiveBufferSize())];
                     int bytesRead;
                     while ((bytesRead = dataInputStream.read(buffer)) != -1) {
                         fileOutputStream.write(buffer, 0, bytesRead);
@@ -230,6 +254,8 @@ public class PeerClient {
                             + client.getRequestedFile()
                             + " baixado com sucesso na pasta "
                             + client.getFolderPath());
+
+                    client.updateFiles();
 
                     server.update(client.getIp(), client.getPort(), client.requestedFile);
 
@@ -247,9 +273,18 @@ public class PeerClient {
                 e.printStackTrace();
             }
         }
+
+        private int downloadBufferSize(int socketBufferSize) {
+            int bufferSize = socketBufferSize;
+            if (bufferSize < BUFFER_SIZE) {
+                bufferSize = BUFFER_SIZE;
+            }
+            return bufferSize;
+        }
     }
 
     static class DownloadSender implements Runnable {
+        private static final int BUFFER_SIZE = 4096;
         private final Socket socket;
         private final PeerClient client;
 
@@ -286,7 +321,7 @@ public class PeerClient {
                     File file = new File(client.getFolderPath(), fileName);
                     FileInputStream fileInputStream = new FileInputStream(file);
 
-                    byte[] buffer = new byte[4096];
+                    byte[] buffer = new byte[downloadBufferSize(file.length())];
                     int bytesRead;
                     while ((bytesRead = fileInputStream.read(buffer)) != -1) {
                         dataOutputStream.write(buffer, 0, bytesRead);
@@ -303,11 +338,17 @@ public class PeerClient {
                 e.printStackTrace();
             }
         }
-    }
 
-    public static int bufferSize() {
+        private int downloadBufferSize(long fileSize) {
+            int bufferSize = BUFFER_SIZE;
+            if (fileSize > BUFFER_SIZE) {
+                while (bufferSize < fileSize && bufferSize < 65535) {
+                    bufferSize *= 2;
+                }
+            }
+            return bufferSize;
+        }
 
-        return 0;
     }
 
     public String getIp() {
@@ -324,6 +365,10 @@ public class PeerClient {
 
     public ArrayList<String> getFileNames() {
         return fileNames;
+    }
+
+    public void updateFiles() {
+        this.fileNames = FileListing(this.getFolderPath());
     }
 
     public String getRequestedFile() {
