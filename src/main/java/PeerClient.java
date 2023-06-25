@@ -67,9 +67,7 @@ public class PeerClient {
 
         ArrayList<String> fileNames = FileListing(folderPath);
 
-        PeerClient peerClient = new PeerClient(ip, port, folderPath, fileNames);
-
-        return peerClient;
+        return new PeerClient(ip, port, folderPath, fileNames);
     }
 
     private static void menu(PeerClient peerClient, RequisitionInterface server) throws ServerNotActiveException, RemoteException {
@@ -116,7 +114,7 @@ public class PeerClient {
                     + ":"
                     + peerClient.getPort()
                     + " com arquivos "
-                    + peerClient.getFileNames().toString());
+                    + String.join(" ", peerClient.getFileNames()));
         } else {
             System.out.println("Requisição falhou: " + response);
         }
@@ -129,7 +127,7 @@ public class PeerClient {
 
         ArrayList<String> response = server.search(peerClient.getIp(), peerClient.getPort(), fileName);
 
-        System.out.println("peers com arquivo solicitado: " + response.toString());
+        System.out.println("peers com arquivo solicitado: " + String.join(" ", response));
         if (!response.isEmpty()) peerClient.setRequestedFile(fileName);
     }
 

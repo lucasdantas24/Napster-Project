@@ -20,7 +20,7 @@ public class Requisitions extends UnicastRemoteObject implements RequisitionInte
         System.out.println("Peer "
                 + peerKey
                 + " adicionado com arquivos "
-                + files.toString());
+                + String.join(" ", files));
         return "JOIN_OK";
     }
 
